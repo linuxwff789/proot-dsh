@@ -335,6 +335,14 @@ static int handle_option_p(Tracee *tracee, const Cli *cli UNUSED, const char *va
         return 0;
 }
 
+static int handle_option_native_offload(Tracee *tracee, const Cli *cli UNUSED, const char *value)
+{
+	int status = initialize_extension(tracee, native_offload_callback, value);
+	if (status < 0)
+		note(tracee, WARNING, INTERNAL, "native-offload not initialized");
+	return 0;
+}
+
 /**
  * Initialize @tracee->qemu.
  */

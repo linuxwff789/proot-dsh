@@ -67,6 +67,7 @@ static int handle_option_kill_on_exit(Tracee *tracee, const Cli *cli, const char
 static int handle_option_L(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_H(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_p(Tracee *tracee, const Cli *cli, const char *value);
+static int handle_option_native_offload(Tracee *tracee, const Cli *cli, const char *value);
 
 static int pre_initialize_bindings(Tracee *, const Cli *, size_t, char *const *, size_t);
 static int post_initialize_exe(Tracee *, const Cli *, size_t, char *const *, size_t);
@@ -283,6 +284,16 @@ Copyright (C) 2015 STMicroelectronics, licensed under GPL v2 or later.",
           .handler = handle_option_L,
           .description = "Correct the size returned from lstat for symbolic links.",
           .detail = "",
+        },
+        { .class = "Extension options",
+          .arguments = {
+                { .name = "--native-offload", .separator = '=', .value = "arg" },
+                { .name = NULL, .separator = '\0', .value = NULL } },
+          .handler = handle_option_native_offload,
+          .description = "Offload execve of matching names to a host-side handler over abstract unix socket.",
+          .detail = "\tArg format: <socket-name>[:<handler>[,<handler>...]]\n"
+                    "\tDefault socket name: native-offload.\n"
+                    "\tExample: --native-offload=native-offload:apple-open,apple-copy",
         },
 	{ .class = "Alias options",
 	  .arguments = {
