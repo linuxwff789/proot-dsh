@@ -1,7 +1,9 @@
 name: Build proot for DSH (dev.lwff.dsh)
 
-"on":
+on:
   workflow_dispatch:
+  push:
+    branches: [master]
 
 permissions:
   contents: write
