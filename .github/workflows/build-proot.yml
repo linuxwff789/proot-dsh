@@ -19,7 +19,70 @@ jobs:
           unzip -q android-ndk-r28b-linux.zip
           echo "ANDROID_NDK_HOME=$PWD/android-ndk-r28b" >> $GITHUB_ENV
 
-      - name: Build proot + loader
+      - name: Build talloc (static, with Samba replace.h shim)
+        run: |
+          set -e
+          NDK="$ANDROID_NDK_HOME"
+          TBIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          CC="$TBIN/aarch64-linux-android26-clang"
+          AR="$TBIN/llvm-ar"
+          RANLIB="$TBIN/llvm-ranlib"
+          STRIP="$TBIN/llvm-strip"
+
+          # Fetch talloc source
+          mkdir -p talloc && cd talloc
+          curl -sLO https://download.samba.org/pub/talloc/talloc-2.4.2.tar.gz
+          tar xzf talloc-2.4.2.tar.gz
+          cp talloc-2.4.2/talloc.c .
+          cp talloc-2.4.2/talloc.h .
+          # Minimal standalone replace.h (from OpenMinis build_proot.sh)
+          cat > replace.h <<'EOF'
+#ifndef REPLACE_H
+#define REPLACE_H
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <string.h>
+#include <stdbool.h>
+#include <errno.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/auxv.h>
+#define TALLOC_BUILD_VERSION_MAJOR   2
+#define TALLOC_BUILD_VERSION_MINOR   4
+#define TALLOC_BUILD_VERSION_RELEASE 2
+#define HAVE_SYS_AUXV_H 1
+#define HAVE_INTPTR_T 1
+#define HAVE_VA_COPY 1
+#define VALGRIND_MAKE_MEM_UNDEFINED(p, n) do { (void)(p); (void)(n); } while (0)
+#define VALGRIND_MAKE_MEM_DEFINED(p, n)   do { (void)(p); (void)(n); } while (0)
+#define VALGRIND_MAKE_MEM_NOACCESS(p, n)  do { (void)(p); (void)(n); } while (0)
+#ifndef ZERO_STRUCT
+#define ZERO_STRUCT(x) memset((char *)&(x), 0, sizeof(x))
+#endif
+#ifndef discard_const
+#define discard_const(ptr) ((void *)((uintptr_t)(ptr)))
+#endif
+#ifndef MIN
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
+#ifndef MAX
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#endif
+#define HAVE_CONSTRUCTOR_ATTRIBUTE 1
+#endif /* REPLACE_H */
+EOF
+          # Compile static libtalloc.a
+          $CC -c talloc.c -o talloc.o -I. \
+            -fPIC -O2 -Wall -std=gnu99 \
+            -DHAVE_STDARG_H=1 -DHAVE_VA_COPY=1 -DHAVE_UNISTD_H=1 -DHAVE_INTPTR_T=1
+          $AR rcs libtalloc.a talloc.o
+          $RANLIB libtalloc.a
+          cd ..
+          cp talloc/libtalloc.a .
+
+      - name: Build proot
         run: |
           set -e
           NDK="$ANDROID_NDK_HOME"
@@ -27,16 +90,12 @@ jobs:
           CC="$TBIN/aarch64-linux-android26-clang"
           AR="$TBIN/llvm-ar"
           STRIP="$TBIN/llvm-strip"
-          # Build talloc statically
-          curl -sLO https://download.samba.org/pub/talloc/talloc-2.4.2.tar.gz
-          tar xzf talloc-2.4.2.tar.gz
-          $CC -c -O2 talloc-2.4.2/talloc.c -o talloc.o
-          $AR rcs libtalloc.a talloc.o
-          # Build proot
+          # Build proot from src/ (OpenMinis fork with native_offload)
           make -C src -f GNUmakefile clean >/dev/null 2>&1 || true
-          make -C src -f GNUmakefile CC="$CC" AR="$AR" \
+          make -C src -f GNUmakefile \
+            CC="$CC" AR="$AR" \
             TALLOC_LIBS="$PWD/libtalloc.a" \
-            proot 2>&1 | tail -15
+            proot 2>&1 | tail -20
           mkdir -p dist
           cp src/proot dist/proot-dsh
           $STRIP dist/proot-dsh
