@@ -1,0 +1,50 @@
+name: Build proot for DSH (dev.lwff.dsh)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup NDK r28
+        run: |
+          curl -sLO https://dl.google.com/android/repository/android-ndk-r28b-linux.zip
+          unzip -q android-ndk-r28b-linux.zip
+          echo "ANDROID_NDK_HOME=$PWD/android-ndk-r28b" >> $GITHUB_ENV
+
+      - name: Build proot + loader
+        run: |
+          set -e
+          NDK="$ANDROID_NDK_HOME"
+          TBIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          CC="$TBIN/aarch64-linux-android26-clang"
+          AR="$TBIN/llvm-ar"
+          STRIP="$TBIN/llvm-strip"
+          # Build talloc statically
+          curl -sLO https://download.samba.org/pub/talloc/talloc-2.4.2.tar.gz
+          tar xzf talloc-2.4.2.tar.gz
+          $CC -c -O2 talloc-2.4.2/talloc.c -o talloc.o
+          $AR rcs libtalloc.a talloc.o
+          # Build proot
+          make -C src -f GNUmakefile clean >/dev/null 2>&1 || true
+          make -C src -f GNUmakefile CC="$CC" AR="$AR" \
+            TALLOC_LIBS="$PWD/libtalloc.a" \
+            proot 2>&1 | tail -15
+          mkdir -p dist
+          cp src/proot dist/proot-dsh
+          $STRIP dist/proot-dsh
+          ls -la dist/
+
+      - name: Upload proot binary
+        uses: actions/upload-artifact@v6
+        with:
+          name: proot-dsh-arm64
+          path: dist/proot-dsh
+          retention-days: 30
