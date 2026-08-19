@@ -1,7 +1,8 @@
-name: Build proot for DSH (dev.lwff.dsh)
+name: Build proot (NDK, package-name-agnostic)
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [master]
 
 permissions:
   contents: write
@@ -15,11 +16,11 @@ jobs:
 
       - name: Setup NDK r28
         run: |
-          curl -sLO https://dl.google.com/android/repository/android-ndk-r28b-linux.zip
-          unzip -q android-ndk-r28b-linux.zip
+          curl -fsSL --retry 5 -o ndk.zip https://dl.google.com/android/repository/android-ndk-r28b-linux.zip
+          unzip -q ndk.zip
           echo "ANDROID_NDK_HOME=$PWD/android-ndk-r28b" >> $GITHUB_ENV
 
-      - name: Build talloc (static, with Samba replace.h shim)
+      - name: Build talloc static
         run: |
           set -e
           NDK="$ANDROID_NDK_HOME"
@@ -27,15 +28,12 @@ jobs:
           CC="$TBIN/aarch64-linux-android26-clang"
           AR="$TBIN/llvm-ar"
           RANLIB="$TBIN/llvm-ranlib"
-          STRIP="$TBIN/llvm-strip"
-
-          # Fetch talloc source
-          mkdir -p talloc && cd talloc
-          curl -sLO https://download.samba.org/pub/talloc/talloc-2.4.2.tar.gz
-          tar xzf talloc-2.4.2.tar.gz
-          cp talloc-2.4.2/talloc.c .
-          cp talloc-2.4.2/talloc.h .
-          # Minimal standalone replace.h (from OpenMinis build_proot.sh)
+          mkdir -p deps/talloc
+          cd deps/talloc
+          curl -fsSL --retry 5 -o talloc.tar.gz https://download.samba.org/pub/talloc/talloc-2.4.3.tar.gz
+          tar xzf talloc.tar.gz
+          cp talloc-2.4.3/talloc.c .
+          cp talloc-2.4.3/talloc.h .
           cat > replace.h <<'EOF'
 #ifndef REPLACE_H
 #define REPLACE_H
@@ -51,7 +49,7 @@ jobs:
 #include <sys/auxv.h>
 #define TALLOC_BUILD_VERSION_MAJOR   2
 #define TALLOC_BUILD_VERSION_MINOR   4
-#define TALLOC_BUILD_VERSION_RELEASE 2
+#define TALLOC_BUILD_VERSION_RELEASE 3
 #define HAVE_SYS_AUXV_H 1
 #define HAVE_INTPTR_T 1
 #define HAVE_VA_COPY 1
@@ -71,18 +69,15 @@ jobs:
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #endif
 #define HAVE_CONSTRUCTOR_ATTRIBUTE 1
-#endif /* REPLACE_H */
+#endif
 EOF
-          # Compile static libtalloc.a
-          $CC -c talloc.c -o talloc.o -I. \
-            -fPIC -O2 -Wall -std=gnu99 \
+          $CC -c talloc.c -o talloc.o -I. -fPIC -O2 -Wall -std=gnu99 \
             -DHAVE_STDARG_H=1 -DHAVE_VA_COPY=1 -DHAVE_UNISTD_H=1 -DHAVE_INTPTR_T=1
           $AR rcs libtalloc.a talloc.o
           $RANLIB libtalloc.a
-          cd ..
-          cp talloc/libtalloc.a .
+          echo "talloc built: $(ls -la libtalloc.a)"
 
-      - name: Build proot
+      - name: Build proot + loader
         run: |
           set -e
           NDK="$ANDROID_NDK_HOME"
@@ -90,20 +85,21 @@ EOF
           CC="$TBIN/aarch64-linux-android26-clang"
           AR="$TBIN/llvm-ar"
           STRIP="$TBIN/llvm-strip"
-          # Build proot from src/ (OpenMinis fork with native_offload)
           make -C src -f GNUmakefile clean >/dev/null 2>&1 || true
           make -C src -f GNUmakefile \
-            CC="$CC" AR="$AR" \
-            TALLOC_LIBS="$PWD/libtalloc.a" \
-            proot 2>&1 | tail -20
+            CC="$CC" AR="$AR" STRIP="$STRIP" \
+            TALLOC_LIBS="$PWD/deps/talloc/libtalloc.a" \
+            proot loader/loader 2>&1 | tail -25
           mkdir -p dist
-          cp src/proot dist/proot-dsh
-          $STRIP dist/proot-dsh
+          cp src/proot dist/libproot.so
+          cp src/loader/loader dist/libproot-loader.so
+          if [ -f src/loader/loader-m32 ]; then cp src/loader/loader-m32 dist/libproot-loader32.so; fi
+          $STRIP dist/libproot.so dist/libproot-loader.so 2>/dev/null || true
           ls -la dist/
 
-      - name: Upload proot binary
+      - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
           name: proot-dsh-arm64
-          path: dist/proot-dsh
+          path: dist/
           retention-days: 30
