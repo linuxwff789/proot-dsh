@@ -89,6 +89,7 @@ jobs:
           make -C src -f GNUmakefile clean >/dev/null 2>&1 || true
           make -C src -f GNUmakefile \
             CC="$CC" AR="$AR" STRIP="$STRIP" \
+            OBJCOPY="$TBIN/llvm-objcopy" OBJDUMP="$TBIN/llvm-objdump" \
             TALLOC_CFLAGS="-I$PWD/deps/talloc" \
             TALLOC_LIBS="$PWD/deps/talloc/libtalloc.a" \
             proot loader/loader 2>&1 | tail -25
